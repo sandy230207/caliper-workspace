@@ -1,0 +1,26 @@
+test:
+    name: basic-contract-benchmark
+    description: test benchmark
+    workers:
+      type: local
+      number: 10
+    rounds:
+      - label: ReadAsset
+        description: Read asset benchmark
+        txDuration: 60
+        rateControl: 
+          type: fixed-load
+          opts:
+            transactionLoad: 2
+        workload:
+          module: workload/caliper-app-lb.js
+          arguments:
+            assets: 10
+            contractId: basic
+monitors:
+  resource:
+  - module: docker
+    options:
+      interval: 5 
+      containers:
+      - all
