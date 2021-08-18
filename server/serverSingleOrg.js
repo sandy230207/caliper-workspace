@@ -17,6 +17,7 @@ const FabricCAServices = require('fabric-ca-client');
 const path = require('path');
 const { buildCAClient, registerAndEnrollUser, enrollAdmin } = require('../test-application/javascript/CAUtil.js');
 const { buildCCPOrg1, buildWallet } = require('../test-application/javascript/AppUtil.js');
+const { get } = require('http');
 
 const caHost = `ca.org1.example.com`;
 const department = `org1.department1`;
@@ -24,8 +25,8 @@ const mspOrg = `Org1MSP`;
 const channelName = 'mychannel';
 const chaincodeName = 'token_utxo';
 const walletPath = path.join(__dirname, 'wallet');
-const orgUserId1 = 'appUser1';
-const orgUserId2 = 'appUser2';
+const orgUserId1 = `appUser${GRPC}1`;
+const orgUserId2 = `appUser${GRPC}2`;
 
 let ccp;
 let wallet;
@@ -153,7 +154,8 @@ async function getClientID(contract) {
 
 async function mint(contract, amount) {
     try {
-        contract.submitTransaction('Mint', amount);
+        const result = contract.submitTransaction('Mint', amount);
+        return result;
     } catch (error) {
         console.error(`******** FAILED to mint: ${error}`);
         return error;
@@ -170,71 +172,86 @@ async function getUtxos(contract) {
     }
 }
 
-async function sendTransaction(res, contract, func, fromUser, toID, endoreser, assetId, owner) {
+async function query(res, contract) {
     try {
-        if (func == 'getAsset') {
-            console.log(`\n--> [1] Evaluate Transaction: ReadAsset, function returns "asset1" attributes`);
-            let result = await contract.evaluateTransaction('ReadAsset', 'asset1');
-            // console.log(`*** Result: ${prettyJSONString(result.toString())}`);
-            res.code(200)
-                .header('Content-Type', 'application/json; charset=utf-8')
-                .send({ result: result.toString() });
-        } else if (func == 'transfer') {
-            if (fromUser == orgUserId1){
-                const utxos = await getUtxos(contract);
-                console.log(`UTXOs of ${orgUserId1}: ${prettyJSONString(utxos)}\n`);
-                
-                const utxoInputKey = JSON.parse(utxos)[0].utxo_key;
-                console.log(`utxoInputKey: ${utxoInputKey}\n`);
-                console.log(typeof utxoInputKey === 'string');
-                var utxoOutput1 = JSON.parse(utxos)[0];
-                var utxoOutput2 = JSON.parse(utxos)[0];
-                utxoOutput1.utxo_key = "";
-                const outputAmount = utxoOutput1.amount - 1000;
-                utxoOutput1.amount = outputAmount;
-                utxoOutput2.utxo_key = "";
-                utxoOutput2.owner = toID;
-                utxoOutput2.amount = 1000;
-                console.log(`Output utxo1:\n${utxoOutput1.amount}\n`);
-                console.log(`Output utxo2:\n${utxoOutput2.amount}\n`);
+        console.log(`\n--> [${GRPC}] Evaluate Transaction: Get UTXOs of user`);
+        const utxos = await getUtxos(contract);
+        const utxoString = prettyJSONString(utxos);
+        console.log(`UTXOs of ${orgUserId1}: ${utxoString}}\n`);
+        res.code(200)
+            .header('Content-Type', 'application/json; charset=utf-8')
+            .send({ utxos: utxoString });
+    } catch (error) {
+        console.error(`******** FAILED: ${error}`);
+        res.code(501)
+            .header('Content-Type', 'application/json; charset=utf-8')
+            .send({ error: error });
+    }
 
-                // let utxoInput = [];
-                // utxoInput.push(utxoInputKey);
-                // console.log("utxoInput", utxoInput);
+}
 
-                if (outputAmount > 0) {
-                    console.log(`\n--> [${GRPC}] Submit Transaction: Transfer ${utxoInputKey} to user1 and user2`);
-                    // await contract.submitTransaction('Transfer', utxoInput, [utxoOutput1, utxoOutput2]);
-                    const result = await contract.submitTransaction('Transfer', [utxoInputKey], [utxoOutput1, utxoOutput2]);
-                    console.log("result:", result);
-                } else if (outputAmount = 0) {
-                    console.log(`\n--> [${GRPC}] Submit Transaction: Transfer ${utxoInputKey} to user2`);
-                    await contract.submitTransaction('Transfer', [utxoInputKey], [utxoOutput2]);
-                }
-            } else {
-                // const utxos = await getUtxos(contract);
-                // console.log(`UTXOs of ${orgUserId1}: ${prettyJSONString(utxos)}\n`);
-                // const utxoInputs = JSON.parse(utxos);
-                // console.log(`Transfer utxos[0]:\n${utxoInputs}\n`);
-                // const utxoInputKeys = utxoInputs.utxo_key;
-                // console.log(`utxos[0].utxo_key:\n${utxoInputKeys}\n`);
-                // let utxoOutput1 = utxoInputs;
-                // let utxoOutput2 = utxoInputs;
-                // utxoOutput1.utxo_key = "";
-                // utxoOutput1.amount = Number(utxoOutput1.amount) - 1000;
-                // utxoOutput2.utxo_key = "";
-                // utxoOutput2.owner = toID;
-                // utxoOutput2.amount = 1000;
-                // console.log(`Output utxo1:\n${utxoOutput1}\n`);
-                // console.log(`Output utxo1:\n${utxoOutput2}\n`);
+async function transfer(res, contract, fromUser, toID) {
+    try {
+        let result;
+        if (fromUser == orgUserId1){
+            const utxos = await getUtxos(contract);
+            console.log(`UTXOs of ${orgUserId1}: ${prettyJSONString(utxos)}\n`);
+            
+            const utxoInputKey = JSON.parse(utxos)[0].utxo_key;
+            console.log(`utxoInputKey: ${utxoInputKey}\n`);
+            console.log(typeof utxoInputKey === 'string');
+            var utxoOutput1 = JSON.parse(utxos)[0];
+            var utxoOutput2 = JSON.parse(utxos)[0];
+            utxoOutput1.utxo_key = "";
+            const outputAmount = utxoOutput1.amount - 1000;
+            utxoOutput1.amount = outputAmount;
+            utxoOutput2.utxo_key = "";
+            utxoOutput2.owner = String(toID);
+            utxoOutput2.amount = 1000;
+            console.log(`Output utxo1:\n${JSON.stringify(utxoOutput1)}\n`);
+            console.log(`Output utxo2:\n${JSON.stringify(utxoOutput2)}\n`);
 
-                // console.log(`\n--> [${GRPC}] Submit Transaction: TransferAsset ${utxoInputKey}, transfer to new owner`);
-                // await contract.submitTransaction('Transfer', [utxoInputKeys], [utxoOutput1, utxoOutput2]);
+            if (outputAmount > 0) {
+                console.log(`\n--> [${GRPC}] Submit Transaction: Transfer ${utxoInputKey} to user1 and user2`);
+                result = await contract.submitTransaction('Transfer',
+                    `["${utxoInputKey}"]`,
+                    `[${JSON.stringify(utxoOutput1)}, ${JSON.stringify(utxoOutput2)}]`
+                );
+            } else if (outputAmount == 0) {
+                utxoOutput2.utxo_key = utxoInputKey;
+                console.log(`\n--> [${GRPC}] Submit Transaction: Transfer ${utxoInputKey} to user2`);
+                result = await contract.submitTransaction('Transfer',
+                    `["${utxoInputKey}"]`,
+                    `[${JSON.stringify(utxoOutput2)}]`
+                );
             }
-            res.code(200)
-                .header('Content-Type', 'application/json; charset=utf-8')
-                .send({ result: 'commited' });
+        } else {
+            const utxos = await getUtxos(contract);
+            console.log(`UTXOs of ${orgUserId2}: ${prettyJSONString(utxos)}\n`);
+            const utxoInputObjects = JSON.parse(utxos);
+            const utxoInputKeys= [];
+            for (let i = 0; i < utxoInputObjects.length; i++) {
+                utxoInputKeys.push(`"${utxoInputObjects[i].utxo_key}"`);
+            }
+            console.log(`utxoInputKeys: ${utxoInputKeys}\n`);
+            var utxoOutput = JSON.parse(utxos)[0];
+            var utxoOutput2 = JSON.parse(utxos)[0];
+            utxoOutput.utxo_key = "";
+            utxoOutput.amount = 5000;
+            utxoOutput.owner = String(toID);
+            console.log(`Output utxo:\n${JSON.stringify(utxoOutput)}\n`);
+
+            console.log(`\n--> [${GRPC}] Submit Transaction: Transfer ${utxoInputKeys} to user1 and user2`);
+            result = await contract.submitTransaction('Transfer',
+                `[${utxoInputKeys}]`,
+                `[${JSON.stringify(utxoOutput)}]`
+            );
         }
+        console.log("result:", String(result));
+        res.code(200)
+            .header('Content-Type', 'application/json; charset=utf-8')
+            .send({ result: String(result) });
+    
         success += 1;
     } catch (error) {
         console.error(`******** FAILED to run the application: ${error}`);
@@ -271,7 +288,7 @@ async function main(){
     const clientID2 = await getClientID(contract2);
     console.log(`clientID of ${orgUserId2}:\n${clientID2}\n`);
 
-    // await mint(contract1, '5000');
+    const result = await mint(contract1, '5000');
 
     let utxos;
     utxos = await getUtxos(contract1);
@@ -279,29 +296,30 @@ async function main(){
 
     const server = require('fastify')();
 
-    server.get('/getAsset', function (req, res) {
-        return sendTransaction(res, contract1, 'getAsset');
+    server.get('/getAsset/:user', function (req, res) {
+        console.log(`id: ${req.params.user}`)
+        if (req.params.user == "1"){
+            query(res, contract1);
+        } else if (req.params.user == "2"){
+            query(res, contract2);
+        } else {
+            res.code(200)
+                .header('Content-Type', 'application/json; charset=utf-8')
+                .send({ utxos: "" });
+        }
     });
 
-    // server.get('/transferAsset/:endoreser/:assetId/:owner', function (req, res) {
-    //     console.log(req.params.endoreser)
-    //     console.log(req.params.assetId)
-    //     console.log(req.params.owner)
-    //     return sendTransaction(contract, 'transferAsset', req.params.endoreser, req.params.assetId, req.params.owner);
-
-    // });
-
     server.get('/transferAsset', function (req, res) {
-        if (count % 5 != 0){
-            sendTransaction(res, contract1, 'transfer', orgUserId1, clientID2);
-        } else {
-            sendTransaction(res, contract2, 'transfer', orgUserId2, clientID1);
-        }
         count += 1;
+        if (count % 6 != 0){
+            transfer(res, contract1, orgUserId1, clientID2);
+        } else {
+            transfer(res, contract2, orgUserId2, clientID1);
+        }
     });
 
     server.get('/status', function (req, res) {
-        return {"success": success, "fail": fail};
+        return {"success": success, "fail": fail, "count": count};
     });
 
     server.get('/down', function (req, res) {
