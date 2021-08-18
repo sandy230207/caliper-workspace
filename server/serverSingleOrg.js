@@ -10,6 +10,7 @@ require('dotenv').config();
 const GRPC = process.env.GRPC;
 let success = 0;
 let fail = 0;
+let count = 0;
 
 const { Gateway, Wallets } = require('fabric-network');
 const FabricCAServices = require('fabric-ca-client');
@@ -21,9 +22,13 @@ const caHost = `ca.org1.example.com`;
 const department = `org1.department1`;
 const mspOrg = `Org1MSP`;
 const channelName = 'mychannel';
-const chaincodeName = 'basic';
+const chaincodeName = 'token_utxo';
 const walletPath = path.join(__dirname, 'wallet');
-const orgUserId = 'appUser';
+const orgUserId1 = 'appUser1';
+const orgUserId2 = 'appUser2';
+
+let ccp;
+let wallet;
 
 console.log(`Starting Fabric Server ${GRPC}...\ncaHost:${caHost}\ndepartment:${department}\nmspOrg:${mspOrg}\n`)
 
@@ -76,29 +81,39 @@ function prettyJSONString(inputString) {
  * To see the SDK workings, try setting the logging to show on the console before running
  *        export HFC_LOGGING='{"debug":"console"}'
  */
-async function getCC() {
+async function enrollUsers() {
 	try {
 		// build an in memory object with the network configuration (also known as a connection profile)
-		const ccp = buildCCPOrg1(GRPC.toString());
+		ccp = await buildCCPOrg1(GRPC.toString());
 
 		// build an instance of the fabric ca services client based on
 		// the information in the network configuration
 		const caClient = buildCAClient(FabricCAServices, ccp, caHost);
 
 		// setup the wallet to hold the credentials of the application user
-		const wallet = await buildWallet(Wallets, walletPath);
+		wallet = await buildWallet(Wallets, walletPath);
 
 		// in a real application this would be done on an administrative flow, and only once
 		await enrollAdmin(caClient, wallet, mspOrg);
 
 		// in a real application this would be done only when a new user was required to be added
 		// and would be part of an administrative flow
-		await registerAndEnrollUser(caClient, wallet, mspOrg, orgUserId, department);
+		await registerAndEnrollUser(caClient, wallet, mspOrg, orgUserId1, department);
+        await registerAndEnrollUser(caClient, wallet, mspOrg, orgUserId2, department);
+        return ccp, wallet
 
-		// Create a new gateway instance for interacting with the fabric network.
-		// In a real application this would be done as the backend server session is setup for
-		// a user that has been verified.
-		const gateway = new Gateway();
+    } catch (error) {
+		console.error(`******** FAILED to enroll users: ${error}`);
+        return error;
+	}
+}
+
+async function getCC(ccp, wallet, user) {
+    try {
+        // Create a new gateway instance for interacting with the fabric network.
+        // In a real application this would be done as the backend server session is setup for
+        // a user that has been verified.
+        const gateway = new Gateway();
 
         // setup the gateway instance
         // The user will now be able to create connections to the fabric network and be able to
@@ -106,7 +121,7 @@ async function getCC() {
         // signed by this user using the credentials stored in the wallet.
         await gateway.connect(ccp, {
             wallet,
-            identity: orgUserId,
+            identity: user,
             discovery: { enabled: true, asLocalhost: true } // using asLocalhost as this gateway is using a fabric network deployed locally
         });
 
@@ -121,25 +136,101 @@ async function getCC() {
         return gateway, contract;
 
     } catch (error) {
-		console.error(`******** FAILED to run connect fabric network: ${error}`);
+        console.error(`******** FAILED to connect fabric network: ${error}`);
         return error;
-	}
+    }
 }
 
-async function sendTransaction(res, contract, func, endoreser, assetId, owner) {
+async function getClientID(contract) {
     try {
-        if(func == 'getAsset'){
+        const clientID = await contract.evaluateTransaction('ClientID');
+        return clientID;
+    } catch (error) {
+        console.error(`******** FAILED to get client ID: ${error}`);
+        return error;
+    }
+}
+
+async function mint(contract, amount) {
+    try {
+        contract.submitTransaction('Mint', amount);
+    } catch (error) {
+        console.error(`******** FAILED to mint: ${error}`);
+        return error;
+    }
+}
+
+async function getUtxos(contract) {
+    try {
+        const utxos = await contract.evaluateTransaction('ClientUTXOs');
+        return utxos;
+    } catch (error) {
+        console.error(`******** FAILED to get UTXOs of user: ${error}`);
+        return error;
+    }
+}
+
+async function sendTransaction(res, contract, func, fromUser, toID, endoreser, assetId, owner) {
+    try {
+        if (func == 'getAsset') {
             console.log(`\n--> [1] Evaluate Transaction: ReadAsset, function returns "asset1" attributes`);
             let result = await contract.evaluateTransaction('ReadAsset', 'asset1');
             // console.log(`*** Result: ${prettyJSONString(result.toString())}`);
             res.code(200)
                 .header('Content-Type', 'application/json; charset=utf-8')
                 .send({ result: result.toString() });
-        } else if(func == 'transferAsset') {
-            console.log(`\n--> [${GRPC}] Submit Transaction: TransferAsset asset1, transfer to new owner`);
-            await contract.submitTransaction('TransferAsset', 'asset1', 'BBB');
-            // await contract.createTransaction('TransferAsset').setEndorsingPeers([org1Endorser, org2Endorser]).submit('asset1', 'Alice');
-            // console.log('*** Result: Transaction commited');
+        } else if (func == 'transfer') {
+            if (fromUser == orgUserId1){
+                const utxos = await getUtxos(contract);
+                console.log(`UTXOs of ${orgUserId1}: ${prettyJSONString(utxos)}\n`);
+                
+                const utxoInputKey = JSON.parse(utxos)[0].utxo_key;
+                console.log(`utxoInputKey: ${utxoInputKey}\n`);
+                console.log(typeof utxoInputKey === 'string');
+                var utxoOutput1 = JSON.parse(utxos)[0];
+                var utxoOutput2 = JSON.parse(utxos)[0];
+                utxoOutput1.utxo_key = "";
+                const outputAmount = utxoOutput1.amount - 1000;
+                utxoOutput1.amount = outputAmount;
+                utxoOutput2.utxo_key = "";
+                utxoOutput2.owner = toID;
+                utxoOutput2.amount = 1000;
+                console.log(`Output utxo1:\n${utxoOutput1.amount}\n`);
+                console.log(`Output utxo2:\n${utxoOutput2.amount}\n`);
+
+                // let utxoInput = [];
+                // utxoInput.push(utxoInputKey);
+                // console.log("utxoInput", utxoInput);
+
+                if (outputAmount > 0) {
+                    console.log(`\n--> [${GRPC}] Submit Transaction: Transfer ${utxoInputKey} to user1 and user2`);
+                    // await contract.submitTransaction('Transfer', utxoInput, [utxoOutput1, utxoOutput2]);
+                    const result = await contract.submitTransaction('Transfer', [utxoInputKey], [utxoOutput1, utxoOutput2]);
+                    console.log("result:", result);
+                } else if (outputAmount = 0) {
+                    console.log(`\n--> [${GRPC}] Submit Transaction: Transfer ${utxoInputKey} to user2`);
+                    await contract.submitTransaction('Transfer', [utxoInputKey], [utxoOutput2]);
+                }
+            } else {
+                // const utxos = await getUtxos(contract);
+                // console.log(`UTXOs of ${orgUserId1}: ${prettyJSONString(utxos)}\n`);
+                // const utxoInputs = JSON.parse(utxos);
+                // console.log(`Transfer utxos[0]:\n${utxoInputs}\n`);
+                // const utxoInputKeys = utxoInputs.utxo_key;
+                // console.log(`utxos[0].utxo_key:\n${utxoInputKeys}\n`);
+                // let utxoOutput1 = utxoInputs;
+                // let utxoOutput2 = utxoInputs;
+                // utxoOutput1.utxo_key = "";
+                // utxoOutput1.amount = Number(utxoOutput1.amount) - 1000;
+                // utxoOutput2.utxo_key = "";
+                // utxoOutput2.owner = toID;
+                // utxoOutput2.amount = 1000;
+                // console.log(`Output utxo1:\n${utxoOutput1}\n`);
+                // console.log(`Output utxo1:\n${utxoOutput2}\n`);
+
+                // console.log(`\n--> [${GRPC}] Submit Transaction: TransferAsset ${utxoInputKey}, transfer to new owner`);
+                // await contract.submitTransaction('Transfer', [utxoInputKeys], [utxoOutput1, utxoOutput2]);
+            }
             res.code(200)
                 .header('Content-Type', 'application/json; charset=utf-8')
                 .send({ result: 'commited' });
@@ -166,14 +257,30 @@ async function disconnect(gateway){
 }
 
 async function main(){
-    let gateway;
-    let contract;
-    gateway, contract = await getCC();
+    ccp, wallet = await enrollUsers();
+
+    let gateway1;
+    let contract1;
+    let gateway2;
+    let contract2;
+    gateway1, contract1 = await getCC(ccp, wallet, orgUserId1);
+    gateway2, contract2 = await getCC(ccp, wallet, orgUserId2);
+
+    const clientID1 = await getClientID(contract1);
+    console.log(`clientID of ${orgUserId1}:\n${clientID1}\n`);
+    const clientID2 = await getClientID(contract2);
+    console.log(`clientID of ${orgUserId2}:\n${clientID2}\n`);
+
+    // await mint(contract1, '5000');
+
+    let utxos;
+    utxos = await getUtxos(contract1);
+    console.log(`UTXOs of ${orgUserId1}: ${prettyJSONString(utxos)}\n`);
 
     const server = require('fastify')();
 
     server.get('/getAsset', function (req, res) {
-        return sendTransaction(res, contract, 'getAsset');
+        return sendTransaction(res, contract1, 'getAsset');
     });
 
     // server.get('/transferAsset/:endoreser/:assetId/:owner', function (req, res) {
@@ -185,7 +292,12 @@ async function main(){
     // });
 
     server.get('/transferAsset', function (req, res) {
-        sendTransaction(res, contract, 'transferAsset');
+        if (count % 5 != 0){
+            sendTransaction(res, contract1, 'transfer', orgUserId1, clientID2);
+        } else {
+            sendTransaction(res, contract2, 'transfer', orgUserId2, clientID1);
+        }
+        count += 1;
     });
 
     server.get('/status', function (req, res) {
@@ -193,7 +305,7 @@ async function main(){
     });
 
     server.get('/down', function (req, res) {
-        const err = disconnect(gateway);
+        const err = disconnect(gateway1);
         if (err != null) {
             return {"status": err };
         }
