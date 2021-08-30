@@ -10,6 +10,7 @@ require('dotenv').config();
 const GRPC = process.env.GRPC;
 let success = 0;
 let fail = 0;
+let count = 0;
 
 const { Gateway, Wallets } = require('fabric-network');
 const FabricCAServices = require('fabric-ca-client');
@@ -185,11 +186,12 @@ async function main(){
     // });
 
     server.get('/transferAsset', function (req, res) {
+        count += 1;
         sendTransaction(res, contract, 'transferAsset');
     });
 
     server.get('/status', function (req, res) {
-        return {"success": success, "fail": fail};
+        return {"success": success, "fail": fail, "count": count};
     });
 
     server.get('/down', function (req, res) {
