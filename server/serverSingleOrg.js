@@ -11,6 +11,7 @@ const GRPC = process.env.GRPC;
 let success = 0;
 let fail = 0;
 let count = 0;
+const assetCount = process.env.ASSET_COUNT;
 
 const { Gateway, Wallets } = require('fabric-network');
 const FabricCAServices = require('fabric-ca-client');
@@ -26,7 +27,7 @@ const chaincodeName = 'basic';
 const walletPath = path.join(__dirname, 'wallet');
 const orgUserId = 'appUser';
 
-console.log(`Starting Fabric Server ${GRPC}...\ncaHost:${caHost}\ndepartment:${department}\nmspOrg:${mspOrg}\n`)
+console.log(`Starting Fabric Server ${GRPC}...\nassetCount:${assetCount}\ncaHost:${caHost}\ndepartment:${department}\nmspOrg:${mspOrg}\n`)
 
 function prettyJSONString(inputString) {
 	return JSON.stringify(JSON.parse(inputString), null, 2);
@@ -122,29 +123,38 @@ async function getCC() {
         return gateway, contract;
 
     } catch (error) {
-		console.error(`******** FAILED to run connect fabric network: ${error}`);
+		console.error(`******** FAILED to connect fabric network: ${error}`);
         return error;
 	}
 }
 
-async function sendTransaction(res, contract, func, endoreser, assetId, owner) {
+async function getAsset(res, contract, assetId, endoreser) {
     try {
-        if(func == 'getAsset'){
-            console.log(`\n--> [1] Evaluate Transaction: ReadAsset, function returns "asset1" attributes`);
-            let result = await contract.evaluateTransaction('ReadAsset', 'asset1');
-            // console.log(`*** Result: ${prettyJSONString(result.toString())}`);
-            res.code(200)
-                .header('Content-Type', 'application/json; charset=utf-8')
-                .send({ result: result.toString() });
-        } else if(func == 'transferAsset') {
-            console.log(`\n--> [${GRPC}] Submit Transaction: TransferAsset asset1, transfer to new owner`);
-            await contract.submitTransaction('TransferAsset', 'asset1', 'BBB');
-            // await contract.createTransaction('TransferAsset').setEndorsingPeers([org1Endorser, org2Endorser]).submit('asset1', 'Alice');
-            // console.log('*** Result: Transaction commited');
-            res.code(200)
-                .header('Content-Type', 'application/json; charset=utf-8')
-                .send({ result: 'commited' });
-        }
+        console.log(`\n--> [1] Evaluate Transaction: ReadAsset, function returns "asset1" attributes`);
+        let result = await contract.evaluateTransaction('ReadAsset', assetId);
+        // console.log(`*** Result: ${prettyJSONString(result.toString())}`);
+        res.code(200)
+            .header('Content-Type', 'application/json; charset=utf-8')
+            .send({ result: result.toString() });
+    } catch (error) {
+        console.error(`******** FAILED to run the application: ${error}`);
+        res.code(503)
+            .header('Content-Type', 'application/json; charset=utf-8')
+            .send({ result: error })
+        return error;
+    }
+}
+
+async function transferAsset(res, contract, endoreser) {
+    try {
+        const assetId = `asset${GRPC}${Math.floor(Math.random() * assetCount + 1).toString()}`;
+        console.log(`\n--> [${GRPC}] Submit Transaction: TransferAsset ${assetId}, transfer to new owner`);
+        await contract.submitTransaction('TransferAsset', assetId, 'Bob');
+        // await contract.createTransaction('TransferAsset').setEndorsingPeers([org1Endorser, org2Endorser]).submit('asset1', 'Alice');
+        // console.log('*** Result: Transaction commited');
+        res.code(200)
+            .header('Content-Type', 'application/json; charset=utf-8')
+            .send({ result: 'commited' });
         success += 1;
     } catch (error) {
         console.error(`******** FAILED to run the application: ${error}`);
@@ -155,6 +165,20 @@ async function sendTransaction(res, contract, func, endoreser, assetId, owner) {
         return error;
     }
 }
+
+async function createAsset(contract, assetId, color, size, owner, appraisedValue, endoreser) {
+    try {
+        console.log(`\n--> [${GRPC}] Submit Transaction: CreateAsset ${assetId}`);
+        await contract.submitTransaction('CreateAsset', assetId, color, size, owner, appraisedValue);
+        // await contract.createTransaction('TransferAsset').setEndorsingPeers([org1Endorser, org2Endorser]).submit('asset1', 'Alice');
+        // console.log('*** Result: Transaction commited');
+    } catch (error) {
+        console.error(`******** FAILED to run the application: ${error}`);
+        return error;
+    }
+}
+
+
 
 async function disconnect(gateway){
     try{
@@ -171,23 +195,27 @@ async function main(){
     let contract;
     gateway, contract = await getCC();
 
+    for (let i = 1; i <= assetCount; i++) {
+        await createAsset(contract, `asset${GRPC}${i.toString()}`, 'red', i, 'Alice', 100 + i);
+    }
+
     const server = require('fastify')();
 
-    server.get('/getAsset', function (req, res) {
-        return sendTransaction(res, contract, 'getAsset');
+    server.get('/getAsset/:assetId', function (req, res) {
+        return getAsset(res, contract, req.params.assetId);
     });
 
     // server.get('/transferAsset/:endoreser/:assetId/:owner', function (req, res) {
     //     console.log(req.params.endoreser)
     //     console.log(req.params.assetId)
     //     console.log(req.params.owner)
-    //     return sendTransaction(contract, 'transferAsset', req.params.endoreser, req.params.assetId, req.params.owner);
+    //     return transferAsset(contract, 'transferAsset', req.params.endoreser, req.params.assetId, req.params.owner);
 
     // });
 
     server.get('/transferAsset', function (req, res) {
         count += 1;
-        sendTransaction(res, contract, 'transferAsset');
+        transferAsset(res, contract);
     });
 
     server.get('/status', function (req, res) {
