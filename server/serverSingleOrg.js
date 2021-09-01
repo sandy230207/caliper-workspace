@@ -147,7 +147,7 @@ async function getAsset(res, contract, assetId, endoreser) {
 
 async function transferAsset(res, contract, endoreser) {
     try {
-        const assetId = `asset${GRPC}${Math.floor(Math.random() * assetCount + 1).toString()}`;
+        const assetId = `asset1${GRPC}${Math.floor(Math.random() * assetCount + 1).toString()}`;
         console.log(`\n--> [${GRPC}] Submit Transaction: TransferAsset ${assetId}, transfer to new owner`);
         await contract.submitTransaction('TransferAsset', assetId, 'Bob');
         // await contract.createTransaction('TransferAsset').setEndorsingPeers([org1Endorser, org2Endorser]).submit('asset1', 'Alice');
@@ -196,7 +196,7 @@ async function main(){
     gateway, contract = await getCC();
 
     for (let i = 1; i <= assetCount; i++) {
-        await createAsset(contract, `asset${GRPC}${i.toString()}`, 'red', i, 'Alice', 100 + i);
+        await createAsset(contract, `asset1${GRPC}${i.toString()}`, 'red', `${i}`, 'Alice', `${100 + i}`);
     }
 
     const server = require('fastify')();
