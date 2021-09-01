@@ -147,7 +147,7 @@ async function getAsset(res, contract, assetId, endoreser) {
 
 async function transferAsset(res, contract, endoreser) {
     try {
-        const assetId = `asset1${GRPC}${Math.floor(Math.random() * assetCount + 1).toString()}`;
+        const assetId = `asset1${GRPC}${Math.floor(Math.random() * 1001).toString()}`;
         console.log(`\n--> [${GRPC}] Submit Transaction: TransferAsset ${assetId}, transfer to new owner`);
         await contract.submitTransaction('TransferAsset', assetId, 'Bob');
         // await contract.createTransaction('TransferAsset').setEndorsingPeers([org1Endorser, org2Endorser]).submit('asset1', 'Alice');
