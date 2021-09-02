@@ -11,8 +11,9 @@ const GRPC = process.env.GRPC;
 const NumberOfUsers = 100;
 let success = 0;
 let fail1 = 0; // number of sender doesn't have enough money or other reasons
-let fail2 = 0; // number of MVCC_READ_CONFLICT or other reasons
-let count = 0; // count = success + fail1 + fail2
+let fail2 = 0; // number of getClientID error
+let fail3 = 0; // number of MVCC_READ_CONFLICT or other reasons
+let count = 0; // count = success + fail1 + fail2 + fail3
 
 const { Gateway, Wallets } = require('fabric-network');
 const FabricCAServices = require('fabric-ca-client');
@@ -196,10 +197,11 @@ async function query(res, contract) {
 
 }
 
-async function transfer(res, contract, toID) {
+async function transfer(res, fromContract, toContract) {
     let utxos;
+    let toID;
     try {
-        utxos = await getUtxos(contract);
+        utxos = await getUtxos(fromContract);
         console.log(`UTXOs of Sender: ${prettyJSONString(utxos)}\n`);
     } catch (error) {
         console.error(`******** FAILED to run the application: ${error}`);
@@ -207,6 +209,16 @@ async function transfer(res, contract, toID) {
             .header('Content-Type', 'application/json; charset=utf-8')
             .send({ result: error })
         fail1 += 1;
+        return error;
+    }
+    try {
+        toID = await getClientID(toContract);
+    } catch (error) {
+        console.error(`******** FAILED to run the application: ${error}`);
+        res.code(502)
+            .header('Content-Type', 'application/json; charset=utf-8')
+            .send({ result: error })
+        fail2 += 1;
         return error;
     }
     try { 
@@ -226,13 +238,13 @@ async function transfer(res, contract, toID) {
 
         if (outputAmount > 0) {
             console.log(`\n--> [${GRPC}] Submit Transaction: Transfer ${utxoInputKey} to user1 and user2`);
-            result = await contract.submitTransaction('Transfer',
+            result = await fromContract.submitTransaction('Transfer',
                 `["${utxoInputKey}"]`,
                 `[${JSON.stringify(utxoOutput1)}, ${JSON.stringify(utxoOutput2)}]`
             );
         } else if (outputAmount == 0) {
             console.log(`\n--> [${GRPC}] Submit Transaction: Transfer ${utxoInputKey} to user2`);
-            result = await contract.submitTransaction('Transfer',
+            result = await fromContract.submitTransaction('Transfer',
                 `["${utxoInputKey}"]`,
                 `[${JSON.stringify(utxoOutput2)}]`
             );
@@ -248,7 +260,7 @@ async function transfer(res, contract, toID) {
         res.code(503)
             .header('Content-Type', 'application/json; charset=utf-8')
             .send({ result: error })
-        fail2 += 1;
+        fail3 += 1;
         return error;
     }
 }
@@ -272,8 +284,7 @@ async function main(){
     for (let i = 0; i < users.length; i++){
         const contract = await getCC(ccp, wallet, users[i]);
         await mint(contract, '5000');
-        const clientID = await getClientID(contract);
-        contracts.set(i, [clientID, contract]);
+        contracts.set(i, contract);
         const utxos = await getUtxos(contract);
         console.log(`UTXOs of ${users[i]}: ${prettyJSONString(utxos)}\n`);
     }
@@ -283,7 +294,7 @@ async function main(){
     server.get('/getAsset/:user', function (req, res) {
         const user = Number(req.params.user);
         if ( user < users.length && user >= 0) {
-            const contract = contracts.get(user)[1];
+            const contract = contracts.get(user);
             query(res, contract);
         } else {
             res.code(200)
@@ -294,15 +305,13 @@ async function main(){
 
     server.get('/transferAsset', function (req, res) {
         count += 1;
-        const clientID = contracts.get(Math.floor(Math.random() * users.length))[0];
-        const contract = contracts.get(Math.floor(Math.random() * users.length))[1];
-        
-        console.log(`clientID of recipient:\n${clientID}\n`);
-        transfer(res, contract, clientID);
+        const fromContract = contracts.get(Math.floor(Math.random() * users.length));
+        const toContract = contracts.get(Math.floor(Math.random() * users.length));
+        transfer(res, fromContract, toContract);
     });
 
     server.get('/status', function (req, res) {
-        return {"success": success, "fail1": fail1, "fail2": fail2, "count": count};
+        return {"success": success, "fail1": fail1, "fail2": fail2, "fail3": fail3, "count": count};
     });
 
     server.get('/down', function (req, res) {
