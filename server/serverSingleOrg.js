@@ -10,8 +10,10 @@ require('dotenv').config();
 const GRPC = process.env.GRPC;
 const NumberOfUsers = 100;
 let success = 0;
-let fail1 = 0; // number of sender doesn't have enough money or other reasons
+let fail1 = 0; // number of get ClientID error
 let fail2 = 0; // number of MVCC_READ_CONFLICT or other reasons
+let fail3 = 0; // number of mint error
+
 let count = 0; // count = success + fail1 + fail2
 
 const { Gateway, Wallets } = require('fabric-network');
@@ -25,7 +27,7 @@ const caHost = `ca.org1.example.com`;
 const department = `org1.department1`;
 const mspOrg = `Org1MSP`;
 const channelName = 'mychannel';
-const chaincodeName = 'token_utxo';
+const chaincodeName = 'token_erc20';
 const walletPath = path.join(__dirname, 'wallet');
 const orgUserId = `appUser${GRPC}`;
 
@@ -150,7 +152,7 @@ async function getCC(ccp, wallet, user) {
 
 async function getClientID(contract) {
     try {
-        const clientID = await contract.evaluateTransaction('ClientID');
+        const clientID = await contract.evaluateTransaction('ClientAccountID');
         return clientID;
     } catch (error) {
         console.error(`******** FAILED to get client ID: ${error}`);
@@ -163,30 +165,30 @@ async function mint(contract, amount) {
         const result = contract.submitTransaction('Mint', amount);
         return result;
     } catch (error) {
-        console.error(`******** FAILED to mint: ${error}`);
+        console.error(`******** FAILED to mint1: ${error}`);
         return error;
     }
 }
 
-async function getUtxos(contract) {
+async function getBalance(contract) {
     try {
-        const utxos = await contract.evaluateTransaction('ClientUTXOs');
-        return utxos;
+        const balance = await contract.evaluateTransaction('ClientAccountBalance');
+        return balance;
     } catch (error) {
-        console.error(`******** FAILED to get UTXOs of user: ${error}`);
+        console.error(`******** FAILED to get balance of user: ${error}`);
         return error;
     }
 }
 
 async function query(res, contract) {
     try {
-        console.log(`\n--> [${GRPC}] Evaluate Transaction: Get UTXOs of user`);
-        const utxos = await getUtxos(contract);
-        const utxoString = prettyJSONString(utxos);
-        console.log(`UTXOs of users: ${utxoString}}\n`);
+        console.log(`\n--> [${GRPC}] Evaluate Transaction: Get balance of user`);
+        const balance = await getBalance(contract);
+        const balanceString = prettyJSONString(balance);
+        console.log(`Balance of users: ${balanceString}}\n`);
         res.code(200)
             .header('Content-Type', 'application/json; charset=utf-8')
-            .send({ utxos: utxoString });
+            .send({ accountBalance: balanceString });
     } catch (error) {
         console.error(`******** FAILED: ${error}`);
         res.code(501)
@@ -196,53 +198,21 @@ async function query(res, contract) {
 
 }
 
-async function transfer(res, contract, toID) {
-    let utxos;
+async function transfer(res, fromContract, toContract) {
+    let toID ;
     try {
-        utxos = await getUtxos(contract);
-        console.log(`UTXOs of Sender: ${prettyJSONString(utxos)}\n`);
+        toID = await getClientID(toContract);
     } catch (error) {
-        console.error(`******** FAILED to run the application: ${error}`);
-        res.code(502)
-            .header('Content-Type', 'application/json; charset=utf-8')
-            .send({ result: error })
         fail1 += 1;
-        return error;
     }
     try { 
-        let result;
-        const utxoInputKey = JSON.parse(utxos)[0].utxo_key;
-        console.log(`utxoInputKey: ${utxoInputKey}\n`);
-        var utxoOutput1 = JSON.parse(utxos)[0];
-        var utxoOutput2 = JSON.parse(utxos)[0];
-        utxoOutput1.utxo_key = "";
-        const outputAmount = utxoOutput1.amount - 500;
-        utxoOutput1.amount = outputAmount;
-        utxoOutput2.utxo_key = "";
-        utxoOutput2.owner = String(toID);
-        utxoOutput2.amount = 500;
-        console.log(`Output utxo1:\n${JSON.stringify(utxoOutput1)}\n`);
-        console.log(`Output utxo2:\n${JSON.stringify(utxoOutput2)}\n`);
-
-        if (outputAmount > 0) {
-            console.log(`\n--> [${GRPC}] Submit Transaction: Transfer ${utxoInputKey} to user1 and user2`);
-            result = await contract.submitTransaction('Transfer',
-                `["${utxoInputKey}"]`,
-                `[${JSON.stringify(utxoOutput1)}, ${JSON.stringify(utxoOutput2)}]`
-            );
-        } else if (outputAmount == 0) {
-            console.log(`\n--> [${GRPC}] Submit Transaction: Transfer ${utxoInputKey} to user2`);
-            result = await contract.submitTransaction('Transfer',
-                `["${utxoInputKey}"]`,
-                `[${JSON.stringify(utxoOutput2)}]`
-            );
-        }
-        console.log("result:", String(result));
+        console.log(`\n--> [${GRPC}] Submit Transaction: Transfer`);
+        await fromContract.submitTransaction('Transfer', toID, "500");
         res.code(200)
             .header('Content-Type', 'application/json; charset=utf-8')
-            .send({ result: String(result) });
-    
+            .send({ result: "committed" });
         success += 1;
+
     } catch (error) {
         console.error(`******** FAILED to run the application: ${error}`);
         res.code(503)
@@ -254,7 +224,7 @@ async function transfer(res, contract, toID) {
 }
 
 async function disconnect(gateway){
-    try{
+    try {
         gateway.disconnect();
         return null;
     } catch (error) {
@@ -271,11 +241,15 @@ async function main(){
     let contracts = new Map();
     for (let i = 0; i < users.length; i++){
         const contract = await getCC(ccp, wallet, users[i]);
-        await mint(contract, '5000');
-        const clientID = await getClientID(contract);
-        contracts.set(i, [clientID, contract]);
-        const utxos = await getUtxos(contract);
-        console.log(`UTXOs of ${users[i]}: ${prettyJSONString(utxos)}\n`);
+        try {
+            await mint(contract, '5000');
+            contracts.set(i, contract);
+            const balance = await getBalance(contract);
+            console.log(`Balance of ${users[i]}: ${prettyJSONString(balance)}\n`);
+        } catch (error) {
+            fail3 += 1;
+            console.error(`******** FAILED to mint2: ${error}`);
+        }
     }
 
     const server = require('fastify')();
@@ -283,26 +257,24 @@ async function main(){
     server.get('/getAsset/:user', function (req, res) {
         const user = Number(req.params.user);
         if ( user < users.length && user >= 0) {
-            const contract = contracts.get(user)[1];
+            const contract = contracts.get(user);
             query(res, contract);
         } else {
             res.code(200)
                 .header('Content-Type', 'application/json; charset=utf-8')
-                .send({ utxos: "" });
+                .send({ balance: "" });
         }
     });
 
     server.get('/transferAsset', function (req, res) {
         count += 1;
-        const clientID = contracts.get(Math.floor(Math.random() * users.length))[0];
-        const contract = contracts.get(Math.floor(Math.random() * users.length))[1];
-        
-        console.log(`clientID of recipient:\n${clientID}\n`);
-        transfer(res, contract, clientID);
+        const from = contracts.get(Math.floor(Math.random() * users.length));
+        const to = contracts.get(Math.floor(Math.random() * users.length));
+        transfer(res, from, to);
     });
 
     server.get('/status', function (req, res) {
-        return {"success": success, "fail1": fail1, "fail2": fail2, "count": count};
+        return {"success": success, "Get_ClientID_Error": fail1, "MVCC_READ_CONFLICT": fail2, "Mint_error": fail3, "count": count};
     });
 
     server.get('/down', function (req, res) {
