@@ -228,11 +228,11 @@ async function transfer(res, fromContract, toContract) {
         var utxoOutput1 = JSON.parse(utxos)[0];
         var utxoOutput2 = JSON.parse(utxos)[0];
         utxoOutput1.utxo_key = "";
-        const outputAmount = utxoOutput1.amount - 500;
+        const outputAmount = utxoOutput1.amount - 5;
         utxoOutput1.amount = outputAmount;
         utxoOutput2.utxo_key = "";
         utxoOutput2.owner = String(toID);
-        utxoOutput2.amount = 500;
+        utxoOutput2.amount = 5;
         console.log(`Output utxo1:\n${JSON.stringify(utxoOutput1)}\n`);
         console.log(`Output utxo2:\n${JSON.stringify(utxoOutput2)}\n`);
 
