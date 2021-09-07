@@ -8,7 +8,7 @@
 
 require('dotenv').config();
 const GRPC = process.env.GRPC;
-const NumberOfUsers = 100;
+const NumberOfUsers = 101;
 let success = 0;
 let fail1 = 0; // number of sender doesn't have enough money or other reasons
 let fail2 = 0; // number of getClientID error
@@ -228,27 +228,19 @@ async function transfer(res, fromContract, toContract) {
         var utxoOutput1 = JSON.parse(utxos)[0];
         var utxoOutput2 = JSON.parse(utxos)[0];
         utxoOutput1.utxo_key = "";
-        const outputAmount = utxoOutput1.amount - 500;
-        utxoOutput1.amount = outputAmount;
+        utxoOutput1.amount = utxoOutput1.amount - 5;
         utxoOutput2.utxo_key = "";
         utxoOutput2.owner = String(toID);
-        utxoOutput2.amount = 500;
+        utxoOutput2.amount = 5;
         console.log(`Output utxo1:\n${JSON.stringify(utxoOutput1)}\n`);
         console.log(`Output utxo2:\n${JSON.stringify(utxoOutput2)}\n`);
 
-        if (outputAmount > 0) {
-            console.log(`\n--> [${GRPC}] Submit Transaction: Transfer ${utxoInputKey} to user1 and user2`);
-            result = await fromContract.submitTransaction('Transfer',
-                `["${utxoInputKey}"]`,
-                `[${JSON.stringify(utxoOutput1)}, ${JSON.stringify(utxoOutput2)}]`
-            );
-        } else if (outputAmount == 0) {
-            console.log(`\n--> [${GRPC}] Submit Transaction: Transfer ${utxoInputKey} to user2`);
-            result = await fromContract.submitTransaction('Transfer',
-                `["${utxoInputKey}"]`,
-                `[${JSON.stringify(utxoOutput2)}]`
-            );
-        }
+        console.log(`\n--> [${GRPC}] Submit Transaction: Transfer ${utxoInputKey} to user1 and user2`);
+        result = await fromContract.submitTransaction('Transfer',
+            `["${utxoInputKey}"]`,
+            `[${JSON.stringify(utxoOutput1)}, ${JSON.stringify(utxoOutput2)}]`
+        );
+
         console.log("result:", String(result));
         res.code(200)
             .header('Content-Type', 'application/json; charset=utf-8')
@@ -288,6 +280,7 @@ async function main(){
         const utxos = await getUtxos(contract);
         console.log(`UTXOs of ${users[i]}: ${prettyJSONString(utxos)}\n`);
     }
+    const toContract = contracts.get(users.length-1);
 
     const server = require('fastify')();
 
@@ -305,8 +298,8 @@ async function main(){
 
     server.get('/transferAsset', function (req, res) {
         count += 1;
-        const fromContract = contracts.get(Math.floor(Math.random() * users.length));
-        const toContract = contracts.get(Math.floor(Math.random() * users.length));
+        const fromContract = contracts.get(Math.floor(Math.random() * (users.length-1)));
+        
         transfer(res, fromContract, toContract);
     });
 
