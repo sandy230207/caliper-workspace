@@ -15,7 +15,7 @@ let fail2 = 0; // number of getClientID error
 let fail3 = 0; // number of MVCC_READ_CONFLICT or other reasons
 let count = 0; // count = success + fail1 + fail2 + fail3
 
-const { Gateway, Wallets } = require('fabric-network');
+const { Gateway, Wallets, DefaultEventHandlerStrategies } = require('fabric-network');
 const FabricCAServices = require('fabric-ca-client');
 const path = require('path');
 const { buildCAClient, registerAndEnrollUser, enrollAdmin } = require('../test-application/javascript/CAUtil.js');
@@ -130,7 +130,10 @@ async function getCC(ccp, wallet, user) {
         await gateway.connect(ccp, {
             wallet,
             identity: user,
-            discovery: { enabled: true, asLocalhost: true } // using asLocalhost as this gateway is using a fabric network deployed locally
+            discovery: { enabled: true, asLocalhost: true }, // using asLocalhost as this gateway is using a fabric network deployed locally
+            eventHandlerOptions: {
+                strategy: DefaultEventHandlerStrategies.MSPID_SCOPE_ANYFORTX
+            }
         });
 
         // Build a network instance based on the channel where the smart contract is deployed
