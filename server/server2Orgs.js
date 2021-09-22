@@ -234,7 +234,7 @@ async function main(){
         port += 3;
     }
     server.listen(port, "127.0.0.1");
-    console.log(`Server is running on 127.0.0.1:${peer}...`)
+    console.log(`Server is running on 127.0.0.1:${port}...`)
 }
 
 main();
