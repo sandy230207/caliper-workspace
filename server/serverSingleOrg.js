@@ -25,7 +25,7 @@ const mspOrg = `Org1MSP`;
 const channelName = 'mychannel';
 const chaincodeName = 'basic';
 const walletPath = path.join(__dirname, 'wallet');
-const orgUserId = 'appUser';
+const orgUserId = `appUser${GRPC}`;
 
 console.log(`Starting Fabric Server ${GRPC}...\nassetCount:${assetCount}\ncaHost:${caHost}\ndepartment:${department}\nmspOrg:${mspOrg}\n`)
 
