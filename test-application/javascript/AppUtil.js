@@ -25,6 +25,22 @@ exports.buildCCPOrg = (org) => {
 	return ccp;
 };
 
+exports.buildCCPOrgs = (org, peer) => {
+	// load the common connection configuration file
+	const ccpPath = path.resolve(__dirname, '..', '..', '..', 'fabric-samples', 'test-network', 'organizations', 'peerOrganizations', 'org' + org + '.example.com', 'connection-org' + org + '-' + peer + '.json');
+	const fileExists = fs.existsSync(ccpPath);
+	if (!fileExists) {
+		throw new Error(`no such file or directory: ${ccpPath}`);
+	}
+	const contents = fs.readFileSync(ccpPath, 'utf8');
+
+	// build a JSON object from the file contents
+	const ccp = JSON.parse(contents);
+
+	console.log(`Loaded the network configuration located at ${ccpPath}`);
+	return ccp;
+};
+
 exports.buildCCPOrg1 = (peer) => {
 	// load the common connection configuration file
 	const ccpPath = path.resolve(__dirname, '..', '..', '..', 'fabric-samples', 'test-network', 'organizations', 'peerOrganizations', 'org1.example.com', 'connection-org1-' + peer + '.json');
